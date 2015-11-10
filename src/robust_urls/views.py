@@ -3,7 +3,7 @@ Created on 13 lut 2014
 
 @author: karol
 '''
-import urlparse
+import urllib.parse as urlparse
 
 from django.conf import settings
 from django.core.urlresolvers import get_resolver, reverse
