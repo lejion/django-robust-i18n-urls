@@ -1,13 +1,12 @@
-'''
-Created on 13 lut 2014
-
-@author: karol
-'''
+import urllib.parse
 from django.conf import settings
-from django.core.urlresolvers import get_resolver
-from django.utils import translation
+from django.core.urlresolvers import get_resolver, NoReverseMatch, resolve, Resolver404
+from django.http import HttpResponseNotFound
+from django.shortcuts import redirect
+from django.core.urlresolvers import reverse
 
-from .utils import try_url_for_language
+from .utils import try_url_for_language, translate_url
+
 
 class RobustI18nLocaleMiddleware(object):
     """
@@ -16,7 +15,7 @@ class RobustI18nLocaleMiddleware(object):
     in `settings.Languages`. If resolution succeeds a proper page will
     be returned instead. If resolution fails nothing happens.
     """
-    
+
     def process_response(self, request, response):
         """
         If request status code is other than 404, just return provided response.
@@ -28,40 +27,44 @@ class RobustI18nLocaleMiddleware(object):
             `settings.Languages` return provided response.
         """
         if response.status_code == 404:
-            all_languages =  [i[0] for i in settings.LANGUAGES]
+            all_languages = [i[0] for i in settings.LANGUAGES]
             resolver = get_resolver(None)
             for language in all_languages:
                 match = try_url_for_language(request.path, language, resolver)
                 if match is not None:
-                    return self.handle_successful_match(
-                        request,
-                        response,
-                        match[0],
-                        match[1],
-                        match[2],
-                        language
-                    )
+                    return self.handle_successful_match(request, match[0], match[1], match[2],
+                                                        match.url_name, match.namespaces)
             return response
         else:
             return response
-    
-    def handle_successful_match(self, request, response,  view, args, kwargs, language):
+
+    def handle_successful_match(self, request, view, args, kwargs, url_name, namespaces):
         """
-        In order make sure to:
-          - store the matched language in users session or cookie
-          - render response from matched view (in context of matched language) and
-            return it.
+        Use found namespace and url name to reverse and redirect to proper page,
+        if that fails use view function to render the correct view or redirect
         """
-        # this is copypasted from django's i18n.py view
-        if hasattr(request, 'session'):
-            request.session['django_language'] = language
-        else:
-            response.set_cookie(settings.LANGUAGE_COOKIE_NAME, language)
-        # we shall activate translation during response rendering
-        # i am not sure if this is a necessity, but it's surely not stupid
-        # to do so
-        translation.activate(language)
-        resp = view(request, *args, **kwargs)
-        resp.render()
-        translation.deactivate()
-        return resp
+
+        try:
+            return self.redirect_by_reverse(request, namespaces, url_name, *args, **kwargs)
+        except (NoReverseMatch, IndexError):
+            pass
+
+        try:
+            return self.render_by_function(request, view, *args, **kwargs)
+        except Exception:
+            return HttpResponseNotFound
+
+    def redirect_by_reverse(self, request, namespaces, url_name, *args, **kwargs):
+        parsed = urllib.parse.urlsplit(request.get_full_path())
+        url = reverse('%s:%s' % (namespaces[0], url_name), args=args, kwargs=kwargs)
+        full_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, url, parsed.query, parsed.fragment))
+        return redirect(full_url)
+
+    def render_by_function(self, request, view, args, kwargs):
+        new_response = view(request, *args, **kwargs)
+        if hasattr(new_response, 'render') and callable(new_response.render):
+            new_response = new_response.render()
+        return new_response
+
+
+4
