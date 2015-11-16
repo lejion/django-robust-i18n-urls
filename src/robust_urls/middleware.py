@@ -44,27 +44,16 @@ class RobustI18nLocaleMiddleware(object):
         if that fails use view function to render the correct view or redirect
         """
         try:
-            return self.redirect_by_reverse(request, namespaces, url_name, *args, **kwargs)
-        except (NoReverseMatch, IndexError):
-            pass
-
-        try:
             return self.render_by_function(request, view, *args, **kwargs)
         except Exception:
             return response
 
-    def redirect_by_reverse(self, request, namespaces, url_name, *args, **kwargs):
-        parsed = urllib.parse.urlsplit(request.get_full_path())
-        to_be_reversed = "%s:%s" % (namespaces[0], url_name) if len(namespaces) > 0 else url_name
-        url = reverse(to_be_reversed, args=args, kwargs=kwargs)
-        full_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, url, parsed.query, parsed.fragment))
-        return redirect(full_url)
-
-    def render_by_function(self, request, view, args, kwargs):
+    def render_by_function(self, request, view, *args, **kwargs):
         new_response = view(request, *args, **kwargs)
         if hasattr(new_response, 'render') and callable(new_response.render):
             new_response = new_response.render()
         return new_response
+
 
 
 4
